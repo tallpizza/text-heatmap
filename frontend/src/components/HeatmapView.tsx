@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { translateWord, translateSentence } from "@/lib/api";
+import { translateWord, translateSentence, translateParagraph } from "@/lib/api";
 
 const WORDS_PER_PAGE = 2000;
 
@@ -97,32 +97,55 @@ export default function HeatmapView({
 
   // 호버 상태
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [hoverPhase, setHoverPhase] = useState<0 | 1 | 2>(0); // 0: 단어만, 1: 단어번역, 2: 문장번역
+  const [hoverPhase, setHoverPhase] = useState<0 | 1 | 2 | 3>(0); // 0: 단어만, 1: 단어번역, 2: 문장번역, 3: 문단번역
   const [wordTranslation, setWordTranslation] = useState<string | null>(null);
   const [wordLoading, setWordLoading] = useState(false);
   const [sentenceTranslation, setSentenceTranslation] = useState<string | null>(null);
   const [sentenceLoading, setSentenceLoading] = useState(false);
   const [sentenceRange, setSentenceRange] = useState<[number, number] | null>(null);
+  const [paragraphTranslation, setParagraphTranslation] = useState<string | null>(null);
+  const [paragraphLoading, setParagraphLoading] = useState(false);
+  const [paragraphRange, setParagraphRange] = useState<[number, number] | null>(null);
   const [tooltipOnTop, setTooltipOnTop] = useState(true);
   const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
   const sentenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 문장 경계 찾기 (. 기준 시작점)
+  // 문장 경계 찾기 (시작: 줄바꿈 또는 마침표 이후, 끝: 마침표)
   const findSentenceBounds = useCallback((index: number): [number, number] => {
     let start = index;
     let end = index;
 
-    // 문장 시작 찾기 (마침표 이후)
+    // 문장 시작 찾기 (마침표 또는 줄바꿈 이후)
     while (start > 0) {
       const prevWord = words[start - 1];
       if (prevWord === "\n" || prevWord.endsWith(".")) break;
       start--;
     }
 
-    // 문장 끝 찾기 (마침표 또는 줄바꿈)
+    // 문장 끝 찾기 (마침표만, 줄바꿈 제외)
     while (end < words.length - 1) {
       const currentWord = words[end];
-      if (currentWord === "\n" || currentWord.endsWith(".")) break;
+      if (currentWord !== "\n" && currentWord.endsWith(".")) break;
+      end++;
+    }
+
+    return [start, end];
+  }, [words]);
+
+  // 문단 경계 찾기 (줄바꿈 기준)
+  const findParagraphBounds = useCallback((index: number): [number, number] => {
+    let start = index;
+    let end = index;
+
+    // 문단 시작 찾기 (줄바꿈 이후)
+    while (start > 0) {
+      if (words[start - 1] === "\n") break;
+      start--;
+    }
+
+    // 문단 끝 찾기 (줄바꿈 전)
+    while (end < words.length - 1) {
+      if (words[end + 1] === "\n") break;
       end++;
     }
 
@@ -144,6 +167,9 @@ export default function HeatmapView({
     setSentenceTranslation(null);
     setSentenceLoading(false);
     setSentenceRange(null);
+    setParagraphTranslation(null);
+    setParagraphLoading(false);
+    setParagraphRange(null);
 
     // 0.5초 후 단어 번역 시작
     hoverTimerRef.current = setTimeout(() => {
@@ -175,6 +201,9 @@ export default function HeatmapView({
         translateSentence(sentence)
           .then((result) => {
             setSentenceTranslation(result.translation);
+            // 문장 번역 완료 후 문단 범위 설정 (하이라이트용)
+            const [pStart, pEnd] = findParagraphBounds(index);
+            setParagraphRange([pStart, pEnd]);
           })
           .catch((e) => {
             console.error("문장 번역 실패:", e);
@@ -185,7 +214,7 @@ export default function HeatmapView({
           });
       }, 3000);
     }, 500);
-  }, [words, findSentenceBounds]);
+  }, [words, findSentenceBounds, findParagraphBounds]);
 
   const handleMouseLeave = useCallback(() => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
@@ -197,7 +226,33 @@ export default function HeatmapView({
     setSentenceTranslation(null);
     setSentenceLoading(false);
     setSentenceRange(null);
+    setParagraphTranslation(null);
+    setParagraphLoading(false);
+    setParagraphRange(null);
   }, []);
+
+  // 클릭 시 문단 번역 시작
+  const handleClick = useCallback((index: number) => {
+    if (hoverPhase < 2 || !paragraphRange) return;
+
+    setHoverPhase(3);
+    setParagraphLoading(true);
+
+    const paragraphWords = words.slice(paragraphRange[0], paragraphRange[1] + 1).filter(w => w !== "\n");
+    const paragraph = paragraphWords.join(" ");
+
+    translateParagraph(paragraph)
+      .then((result) => {
+        setParagraphTranslation(result.translation);
+      })
+      .catch((e) => {
+        console.error("문단 번역 실패:", e);
+        setParagraphTranslation("번역 실패");
+      })
+      .finally(() => {
+        setParagraphLoading(false);
+      });
+  }, [hoverPhase, paragraphRange, words]);
 
   useEffect(() => {
     setMounted(true);
@@ -286,6 +341,10 @@ export default function HeatmapView({
     // 호버 상태에 따른 추가 스타일
     const isHovered = hoveredIndex === index;
     const isInSentence = sentenceRange && index >= sentenceRange[0] && index <= sentenceRange[1];
+    const isInParagraph = paragraphRange && index >= paragraphRange[0] && index <= paragraphRange[1];
+
+    // 문장 번역 완료 여부 (문단 하이라이트 표시 조건)
+    const sentenceComplete = hoverPhase >= 2 && !sentenceLoading && sentenceTranslation;
 
     let hoverStyle: React.CSSProperties = {};
     if (isHovered) {
@@ -294,6 +353,14 @@ export default function HeatmapView({
         background: `rgba(255, 180, 50, ${0.6 + hoverPhase * 0.15})`,
         borderRadius: "4px",
         transition: "background 0.3s ease",
+      };
+    } else if (sentenceComplete && isInParagraph && !isInSentence) {
+      // 문단 내 단어들 (문장 제외): 회색 하이라이트 (더블클릭 유도)
+      hoverStyle = {
+        background: `rgba(180, 180, 180, 0.3)`,
+        borderRadius: "2px",
+        transition: "background 0.3s ease",
+        cursor: "pointer",
       };
     } else if (hoverPhase >= 2 && isInSentence) {
       // 문장 내 다른 단어들: 약간 진하게
@@ -319,6 +386,7 @@ export default function HeatmapView({
         style={combinedStyle}
         onMouseEnter={(e) => handleMouseEnter(index, word, e)}
         onMouseLeave={handleMouseLeave}
+        onClick={() => handleClick(index)}
       >
         {needsSpace ? " " : ""}{word}
         {/* rendering-conditional-render: 삼항 연산자 사용 */}
@@ -331,8 +399,9 @@ export default function HeatmapView({
     );
   };
 
-  // 문장 툴팁 표시 여부
-  const showSentenceTooltip = hoverPhase >= 2;
+  // 번역 툴팁 표시 여부
+  const showSentenceTooltip = hoverPhase >= 2 && hoverPhase < 3;
+  const showParagraphTooltip = hoverPhase === 3;
 
   return (
     <>
@@ -389,6 +458,21 @@ export default function HeatmapView({
           }}
         >
           {sentenceLoading ? "문장 번역 중..." : sentenceTranslation || "번역 대기중..."}
+        </div>
+      ) : null}
+
+      {/* 문단 번역 툴팁 (고정 위치) */}
+      {showParagraphTooltip ? (
+        <div
+          style={{
+            ...SENTENCE_TOOLTIP_BASE_STYLE,
+            top: tooltipOnTop ? '100px' : 'auto',
+            bottom: tooltipOnTop ? 'auto' : '100px',
+            maxWidth: '700px',
+            borderLeft: '4px solid #ffd54f',
+          }}
+        >
+          {paragraphLoading ? "문단 번역 중..." : paragraphTranslation || "번역 대기중..."}
         </div>
       ) : null}
     </>

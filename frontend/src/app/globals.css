@@ -48,7 +48,7 @@ html {
 body {
   background: var(--background) !important;
   color: var(--text-primary) !important;
-  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-family: var(--font-dm-sans), var(--font-noto-sans-kr), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -434,7 +434,7 @@ body {
   padding: 8px 14px;
   border-radius: 8px;
   font-size: 0.9rem;
-  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-family: var(--font-noto-sans-kr), var(--font-dm-sans), system-ui, sans-serif;
   white-space: nowrap;
   z-index: 100;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -461,7 +461,7 @@ body {
   padding: 16px 24px;
   border-radius: 12px;
   font-size: 1rem;
-  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-family: var(--font-noto-sans-kr), var(--font-dm-sans), system-ui, sans-serif;
   max-width: 600px;
   width: max-content;
   white-space: normal;
