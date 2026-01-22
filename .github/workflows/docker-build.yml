@@ -108,4 +108,4 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            NEXT_PUBLIC_API_URL=https://read.tallpizza.com/api
+            NEXT_PUBLIC_API_URL=https://read.tallpizza.com/backend
