@@ -1,23 +1,34 @@
 import re
 import json
-from typing import List, Tuple
+import asyncio
+import logging
+from typing import List, Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor
 import anthropic
 from config import ANTHROPIC_API_KEY, HAIKU_MODEL
 
-EXTRACTION_PROMPT = """다음 텍스트에서 독자가 빠르게 핵심을 파악하는 데 도움이 되는 중요한 키워드와 구문을 추출해주세요.
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+MAX_CONCURRENT_CHUNKS = 5  # 동시 처리할 청크 수
+
+CHUNK_SIZE = 5000  # 청크당 최대 문자 수 (빠른 응답 위해 작게 설정)
+
+EXTRACTION_PROMPT = """다음 텍스트에서 핵심 내용을 담고 있는 중요한 문장이나 구절을 추출해주세요.
 
 규칙:
+- 의미 있는 완전한 문장이나 긴 구절만 추출 (최소 5단어 이상)
+- "I", "the", "a" 같은 단독 단어는 절대 추출하지 마세요
+- 핵심 주장, 결론, 중요한 사실, 정의가 담긴 문장 위주
 - 텍스트 길이에 비례해서 적절한 수만큼 추출
-- 각 항목에 중요도 점수 (0.0~1.0) 부여
-- 고유명사, 숫자, 핵심 동사, 핵심 개념 위주
 
 점수 기준:
-- 0.9~1.0: 핵심 주제, 결론, 액션 아이템
-- 0.7~0.8: 주요 개념, 중요 조건
-- 0.5~0.6: 부가 정보지만 알아두면 좋은 것
+- 0.9~1.0: 핵심 주장, 결론, 중요한 정의
+- 0.7~0.8: 주요 논점, 중요한 사실
+- 0.5~0.6: 보조적이지만 유용한 정보
 
 JSON 형식으로만 응답 (다른 텍스트 없이):
-{"keywords": [{"text": "키워드", "score": 0.9}, ...]}
+{"sentences": [{"text": "중요한 문장 전체", "score": 0.9}, ...]}
 
 텍스트:
 """
@@ -38,15 +49,117 @@ def split_into_words(text: str) -> List[str]:
     return result
 
 
+def split_into_chunks(text: str) -> List[str]:
+    """텍스트를 청크로 분할합니다. 챕터나 섹션 경계를 우선 감지."""
+    if len(text) <= CHUNK_SIZE:
+        return [text]
+
+    chunks = []
+
+    # 챕터/섹션 패턴 감지
+    chapter_patterns = [
+        r'\n(?=Chapter\s+\d+)',  # Chapter 1, Chapter 2...
+        r'\n(?=CHAPTER\s+\d+)',  # CHAPTER 1...
+        r'\n(?=제\s*\d+\s*장)',   # 제1장, 제 2 장...
+        r'\n(?=Part\s+\d+)',      # Part 1...
+        r'\n(?=\d+\.\s+[A-Z])',   # 1. Title...
+    ]
+
+    # 챕터 경계로 분할 시도
+    split_points = []
+    for pattern in chapter_patterns:
+        matches = list(re.finditer(pattern, text))
+        if matches:
+            split_points = [m.start() for m in matches]
+            break
+
+    if split_points:
+        # 챕터 경계로 분할
+        prev = 0
+        for point in split_points:
+            if point > prev:
+                chunk = text[prev:point].strip()
+                if chunk:
+                    # 청크가 너무 크면 추가 분할
+                    if len(chunk) > CHUNK_SIZE:
+                        chunks.extend(split_by_size(chunk))
+                    else:
+                        chunks.append(chunk)
+            prev = point
+        # 마지막 청크
+        if prev < len(text):
+            chunk = text[prev:].strip()
+            if chunk:
+                if len(chunk) > CHUNK_SIZE:
+                    chunks.extend(split_by_size(chunk))
+                else:
+                    chunks.append(chunk)
+    else:
+        # 챕터 없으면 크기로 분할
+        chunks = split_by_size(text)
+
+    return chunks
+
+
+def split_by_size(text: str) -> List[str]:
+    """텍스트를 크기 기준으로 분할. 문단 경계 우선."""
+    if len(text) <= CHUNK_SIZE:
+        return [text]
+
+    chunks = []
+    current_pos = 0
+
+    while current_pos < len(text):
+        end_pos = min(current_pos + CHUNK_SIZE, len(text))
+
+        if end_pos < len(text):
+            # 문단 경계 찾기 (더블 줄바꿈)
+            newline_pos = text.rfind('\n\n', current_pos, end_pos)
+            if newline_pos > current_pos + CHUNK_SIZE // 2:
+                end_pos = newline_pos + 2
+            else:
+                # 단일 줄바꿈 찾기
+                newline_pos = text.rfind('\n', current_pos, end_pos)
+                if newline_pos > current_pos + CHUNK_SIZE // 2:
+                    end_pos = newline_pos + 1
+
+        chunk = text[current_pos:end_pos].strip()
+        if chunk:
+            chunks.append(chunk)
+        current_pos = end_pos
+
+    return chunks
+
+
 def match_keywords_to_words(
     words: List[str],
     keywords: List[dict],
 ) -> List[float]:
-    """키워드를 원문 단어에 매칭하여 점수 배열 생성."""
+    """문장/구절을 원문 단어에 매칭하여 점수 배열 생성."""
     scores = [0.0] * len(words)
 
-    # 줄바꿈 제외한 단어들의 텍스트 (매칭용)
-    word_texts = [w if w != '\n' else '' for w in words]
+    # 불용어 (단독으로 매칭되면 안 되는 단어들)
+    stopwords = {
+        'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves',
+        'you', 'your', 'yours', 'yourself', 'yourselves',
+        'he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself',
+        'it', 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves',
+        'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those',
+        'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+        'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as',
+        'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about',
+        'against', 'between', 'into', 'through', 'during', 'before',
+        'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in',
+        'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then',
+        'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all',
+        'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no',
+        'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+        's', 't', 'can', 'will', 'just', 'don', 'should', 'now', 'd',
+        'll', 'm', 'o', 're', 've', 'y', 'ain', 'aren', 'couldn', 'didn',
+        'doesn', 'hadn', 'hasn', 'haven', 'isn', 'ma', 'mightn', 'mustn',
+        'needn', 'shan', 'shouldn', 'wasn', 'weren', 'won', 'wouldn'
+    }
 
     for kw in keywords:
         keyword_text = kw.get("text", "")
@@ -55,12 +168,22 @@ def match_keywords_to_words(
         if not keyword_text:
             continue
 
-        # 키워드를 단어로 분리
+        # 문장/구절을 단어로 분리
         kw_words = keyword_text.split()
         if not kw_words:
             continue
 
-        # 원문에서 키워드 시퀀스 찾기
+        # 단일 단어이고 불용어면 스킵
+        if len(kw_words) == 1 and kw_words[0].lower().strip('.,!?"\';:') in stopwords:
+            continue
+
+        # 2단어 이하이고 모두 불용어면 스킵
+        if len(kw_words) <= 2:
+            non_stop = [w for w in kw_words if w.lower().strip('.,!?"\';:') not in stopwords]
+            if len(non_stop) == 0:
+                continue
+
+        # 원문에서 문장/구절 시퀀스 찾기
         for i in range(len(words) - len(kw_words) + 1):
             match = True
             matched_indices = []
@@ -75,8 +198,11 @@ def match_keywords_to_words(
                     match = False
                     break
 
-                # 단어 비교 (대소문자 무시, 부분 매칭)
-                if kw_word.lower() in words[j].lower() or words[j].lower() in kw_word.lower():
+                # 단어 비교 (대소문자 무시, 구두점 제거하여 비교)
+                word_clean = words[j].lower().strip('.,!?"\';:()[]{}')
+                kw_clean = kw_word.lower().strip('.,!?"\';:()[]{}')
+
+                if word_clean == kw_clean or kw_clean in word_clean or word_clean in kw_clean:
                     matched_indices.append(j)
                     j += 1
                 else:
@@ -90,9 +216,38 @@ def match_keywords_to_words(
     return scores
 
 
-async def extract_important_parts(text: str) -> Tuple[List[str], List[float]]:
+def extract_chunk_sync(client: anthropic.Anthropic, chunk_text: str, chunk_idx: int) -> List[dict]:
+    """단일 청크에서 키워드 추출 (동기)."""
+    logger.info(f"청크 {chunk_idx} 처리 시작 ({len(chunk_text):,}자)")
+    try:
+        message = client.messages.create(
+            model=HAIKU_MODEL,
+            max_tokens=4096,
+            messages=[
+                {"role": "user", "content": EXTRACTION_PROMPT + chunk_text}
+            ]
+        )
+
+        response_text = message.content[0].text.strip()
+        json_match = re.search(r'\{[\s\S]*\}', response_text)
+
+        if not json_match:
+            logger.warning(f"청크 {chunk_idx}: JSON 응답 없음")
+            return []
+
+        result = json.loads(json_match.group())
+        # sentences 또는 keywords 둘 다 지원 (하위 호환성)
+        sentences = result.get("sentences", result.get("keywords", []))
+        logger.info(f"청크 {chunk_idx} 완료: {len(sentences)}개 문장 추출")
+        return sentences
+    except Exception as e:
+        logger.error(f"청크 {chunk_idx} 에러: {e}")
+        return []
+
+
+async def extract_important_parts_single_chunk(text: str) -> Tuple[List[str], List[float]]:
     """
-    Haiku API를 사용하여 중요한 키워드를 추출하고 단어별 점수를 반환합니다.
+    단일 청크(또는 짧은 텍스트)를 Haiku API로 분석합니다.
 
     Returns:
         words: 단어 리스트
@@ -108,30 +263,19 @@ async def extract_important_parts(text: str) -> Tuple[List[str], List[float]]:
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # Haiku API 호출
-    message = client.messages.create(
-        model=HAIKU_MODEL,
-        max_tokens=4096,
-        messages=[
-            {"role": "user", "content": EXTRACTION_PROMPT + text}
-        ]
-    )
+    logger.info(f"텍스트 분석 시작 ({len(text):,}자, {len(words):,}단어)")
 
-    # 응답 파싱
-    response_text = message.content[0].text.strip()
+    # 단일 청크 처리
+    keywords = extract_chunk_sync(client, text, 0)
 
-    # JSON 추출 (응답에 다른 텍스트가 있을 수 있음)
-    json_match = re.search(r'\{[\s\S]*\}', response_text)
-    if not json_match:
-        return words, [0.0] * len(words)
-
-    try:
-        result = json.loads(json_match.group())
-        keywords = result.get("keywords", [])
-    except json.JSONDecodeError:
-        return words, [0.0] * len(words)
+    logger.info(f"{len(keywords)}개 키워드 추출 완료")
 
     # 키워드를 단어에 매칭
     scores = match_keywords_to_words(words, keywords)
 
     return words, scores
+
+
+def get_chunk_count(text: str) -> int:
+    """텍스트의 청크 수를 반환합니다."""
+    return len(split_into_chunks(text))
