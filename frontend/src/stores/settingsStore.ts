@@ -6,10 +6,12 @@ interface SettingsState {
   lineHeight: number;    // 배수
   textAlign: 'left' | 'center' | 'justify';
   maxWidth: number;      // rem 단위
+  translationEnabled: boolean;
   setFontSize: (size: number) => void;
   setLineHeight: (height: number) => void;
   setTextAlign: (align: 'left' | 'center' | 'justify') => void;
   setMaxWidth: (width: number) => void;
+  setTranslationEnabled: (enabled: boolean) => void;
   resetSettings: () => void;
 }
 
@@ -18,6 +20,7 @@ const defaultSettings = {
   lineHeight: 2,
   textAlign: 'justify' as const,
   maxWidth: 50,
+  translationEnabled: false,
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -28,6 +31,7 @@ export const useSettingsStore = create<SettingsState>()(
       setLineHeight: (height) => set({ lineHeight: height }),
       setTextAlign: (align) => set({ textAlign: align }),
       setMaxWidth: (width) => set({ maxWidth: width }),
+      setTranslationEnabled: (enabled) => set({ translationEnabled: enabled }),
       resetSettings: () => set(defaultSettings),
     }),
     {

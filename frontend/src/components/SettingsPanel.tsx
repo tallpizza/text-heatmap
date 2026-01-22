@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, memo, useCallback } from 'react';
+import { useState, useEffect, memo, useCallback, useRef } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 // rendering-hoist-jsx: 정적 SVG를 컴포넌트 외부로 추출
@@ -23,21 +23,38 @@ const PlaceholderButton = (
 export default function SettingsPanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   const {
     fontSize,
     lineHeight,
     textAlign,
     maxWidth,
+    translationEnabled,
     setFontSize,
     setLineHeight,
     setTextAlign,
     setMaxWidth,
+    setTranslationEnabled,
     resetSettings,
   } = useSettingsStore();
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // 외부 클릭 시 패널 닫기
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
 
   // rerender-functional-setstate: 토글 콜백 안정화
   const toggleOpen = useCallback(() => setIsOpen(prev => !prev), []);
@@ -48,7 +65,7 @@ export default function SettingsPanel() {
   }
 
   return (
-    <div className="fixed top-4 right-4 z-50">
+    <div ref={panelRef} className="fixed top-4 right-4 z-50">
       <button
         className="flex items-center justify-center w-10 h-10 rounded-full bg-white border border-gray-200 shadow-md hover:shadow-lg text-gray-500 hover:text-gray-700 transition-all"
         onClick={toggleOpen}
@@ -153,6 +170,24 @@ export default function SettingsPanel() {
                   양쪽
                 </button>
               </div>
+            </div>
+
+            <div className="pt-3 border-t border-gray-100">
+              <label className="flex justify-between items-center cursor-pointer">
+                <span className="text-xs text-gray-500">번역</span>
+                <button
+                  onClick={() => setTranslationEnabled(!translationEnabled)}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${
+                    translationEnabled ? 'bg-orange-500' : 'bg-gray-300'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                      translationEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </label>
             </div>
 
           </div>
