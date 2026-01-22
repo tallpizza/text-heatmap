@@ -3,8 +3,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MODEL_NAME = os.getenv("MODEL_NAME", "distilbert-base-multilingual-cased")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "512"))
-OVERLAP = int(os.getenv("OVERLAP", "50"))
+# Anthropic API
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+HAIKU_MODEL = os.getenv("HAIKU_MODEL", "claude-3-5-haiku-latest")
+
+# Limits
 MAX_CHARACTERS = int(os.getenv("MAX_CHARACTERS", "100000"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "10"))

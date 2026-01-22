@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from typing import List, Optional
-from services.attention import extract_attention_scores, process_long_text
+from typing import List
+from services.extraction import extract_important_parts
 from services.file_parser import extract_text
 from config import MAX_CHARACTERS, MAX_FILE_SIZE_MB
 
@@ -31,7 +31,12 @@ async def analyze_text(request: TextRequest):
             detail=f"텍스트가 너무 깁니다. 최대 {MAX_CHARACTERS}자까지 가능합니다.",
         )
 
-    words, scores = process_long_text(text)
+    try:
+        words, scores = await extract_important_parts(text)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"분석 중 오류가 발생했습니다: {str(e)}")
 
     return AnalyzeResponse(words=words, scores=scores)
 
@@ -68,6 +73,11 @@ async def analyze_file(file: UploadFile = File(...)):
             detail=f"텍스트가 너무 깁니다. 최대 {MAX_CHARACTERS}자까지 가능합니다.",
         )
 
-    words, scores = process_long_text(text)
+    try:
+        words, scores = await extract_important_parts(text)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"분석 중 오류가 발생했습니다: {str(e)}")
 
     return AnalyzeResponse(words=words, scores=scores)

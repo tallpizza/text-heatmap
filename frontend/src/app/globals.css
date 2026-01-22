@@ -271,52 +271,38 @@ body {
   color: var(--text-primary);
 }
 
+/* ========== Heatmap Line Styles ========== */
+.heatmap-line {
+  display: block;
+  margin-bottom: 6px;
+  padding: 0 8px;
+  line-height: 2.2;
+  border-radius: 6px;
+}
+
 /* ========== Heatmap Word Styles ========== */
 .heatmap-word {
-  padding: 2px 4px;
-  border-radius: 3px;
-  transition: all 0.15s ease;
+  display: inline;
   cursor: default;
+  transition: all 0.15s ease;
+  position: relative;
 }
 
 .heatmap-word:hover {
-  transform: translateY(-1px);
+  filter: brightness(0.92);
 }
 
-.score-low {
-  background: transparent;
-  color: var(--text-primary);
-  text-decoration: underline;
-  text-decoration-color: rgba(196, 93, 53, 0.25);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 4px;
+/* 코드 인라인 */
+.md-code-inline {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
 }
 
-.score-medium {
-  background: rgba(196, 93, 53, 0.12);
-  color: var(--text-primary);
-  text-decoration: underline;
-  text-decoration-color: rgba(196, 93, 53, 0.5);
-  text-decoration-thickness: 2px;
-  text-underline-offset: 4px;
-}
-
-.score-high {
-  background: rgba(196, 93, 53, 0.25);
-  color: #6b2a12;
-  font-weight: 500;
-  text-decoration: underline;
-  text-decoration-color: var(--accent);
-  text-decoration-thickness: 3px;
-  text-underline-offset: 4px;
-}
-
-.score-very-high {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  font-weight: 600;
-  text-decoration: none;
-  box-shadow: 0 2px 4px rgba(196, 93, 53, 0.3);
+/* ========== Legend Sample ========== */
+.legend-sample {
+  padding: 4px 12px;
+  border-radius: 4px;
+  display: inline-block;
 }
 
 /* ========== Legend ========== */
