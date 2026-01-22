@@ -1,9 +1,11 @@
+import json
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional
 from services.extraction import extract_important_parts_single_chunk, split_into_chunks, split_into_words
 from services.file_parser import extract_text
-from config import MAX_CHARACTERS, MAX_FILE_SIZE_MB
+from services.cache import cache, CacheService
+from config import MAX_CHARACTERS, MAX_FILE_SIZE_MB, CACHE_TTL_ANALYZE, CACHE_TTL_FILE, HAIKU_MODEL
 
 router = APIRouter()
 
@@ -20,6 +22,7 @@ class ChunkRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     words: List[str]
     scores: List[float]
+    cached: bool = False
 
 
 class ChunkAnalyzeResponse(BaseModel):
@@ -27,12 +30,14 @@ class ChunkAnalyzeResponse(BaseModel):
     scores: List[float]
     chunk_index: int
     total_chunks: int
+    cached: bool = False
 
 
 class FileUploadResponse(BaseModel):
     text: str
     total_chunks: int
     total_characters: int
+    cached: bool = False
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
@@ -50,6 +55,13 @@ async def analyze_text(request: TextRequest):
             detail="텍스트가 너무 깁니다. 긴 텍스트는 파일 업로드를 사용해주세요.",
         )
 
+    # 캐시 확인
+    cache_key = CacheService.make_analyze_key(HAIKU_MODEL, text)
+    cached_result = await cache.get(cache_key)
+    if cached_result:
+        data = json.loads(cached_result)
+        return AnalyzeResponse(words=data["words"], scores=data["scores"], cached=True)
+
     try:
         words, scores = await extract_important_parts_single_chunk(text)
     except ValueError as e:
@@ -57,7 +69,10 @@ async def analyze_text(request: TextRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"분석 중 오류가 발생했습니다: {str(e)}")
 
-    return AnalyzeResponse(words=words, scores=scores)
+    # 캐시 저장
+    await cache.set(cache_key, json.dumps({"words": words, "scores": scores}), CACHE_TTL_ANALYZE)
+
+    return AnalyzeResponse(words=words, scores=scores, cached=False)
 
 
 @router.post("/upload", response_model=FileUploadResponse)
@@ -70,6 +85,18 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=400,
             detail=f"파일이 너무 큽니다. 최대 {MAX_FILE_SIZE_MB}MB까지 가능합니다.",
+        )
+
+    # 파일 캐시 확인
+    cache_key = CacheService.make_file_key(content)
+    cached_result = await cache.get(cache_key)
+    if cached_result:
+        data = json.loads(cached_result)
+        return FileUploadResponse(
+            text=data["text"],
+            total_chunks=data["total_chunks"],
+            total_characters=data["total_characters"],
+            cached=True,
         )
 
     try:
@@ -85,11 +112,21 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="파일에서 텍스트를 추출할 수 없습니다.")
 
     chunks = split_into_chunks(text)
+    total_chunks = len(chunks)
+    total_characters = len(text)
+
+    # 파일 캐시 저장
+    await cache.set(
+        cache_key,
+        json.dumps({"text": text, "total_chunks": total_chunks, "total_characters": total_characters}),
+        CACHE_TTL_FILE
+    )
 
     return FileUploadResponse(
         text=text,
-        total_chunks=len(chunks),
-        total_characters=len(text),
+        total_chunks=total_chunks,
+        total_characters=total_characters,
+        cached=False,
     )
 
 
@@ -113,6 +150,19 @@ async def analyze_chunk(request: ChunkRequest):
 
     chunk_text = chunks[chunk_index]
 
+    # 청크 캐시 확인 (청크 텍스트 기준)
+    cache_key = CacheService.make_analyze_key(HAIKU_MODEL, chunk_text)
+    cached_result = await cache.get(cache_key)
+    if cached_result:
+        data = json.loads(cached_result)
+        return ChunkAnalyzeResponse(
+            words=data["words"],
+            scores=data["scores"],
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            cached=True,
+        )
+
     try:
         words, scores = await extract_important_parts_single_chunk(chunk_text)
     except ValueError as e:
@@ -120,11 +170,15 @@ async def analyze_chunk(request: ChunkRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"분석 중 오류가 발생했습니다: {str(e)}")
 
+    # 청크 캐시 저장
+    await cache.set(cache_key, json.dumps({"words": words, "scores": scores}), CACHE_TTL_ANALYZE)
+
     return ChunkAnalyzeResponse(
         words=words,
         scores=scores,
         chunk_index=chunk_index,
         total_chunks=total_chunks,
+        cached=False,
     )
 
 
@@ -141,21 +195,44 @@ async def analyze_file(file: UploadFile = File(...)):
             detail=f"파일이 너무 큽니다. 최대 {MAX_FILE_SIZE_MB}MB까지 가능합니다.",
         )
 
-    try:
-        text = extract_text(file.filename, content)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"파일 처리 중 오류가 발생했습니다: {str(e)}")
+    # 파일 캐시 확인 (텍스트 추출 결과)
+    file_cache_key = CacheService.make_file_key(content)
+    cached_file = await cache.get(file_cache_key)
 
-    text = text.strip()
+    if cached_file:
+        data = json.loads(cached_file)
+        text = data["text"]
+    else:
+        try:
+            text = extract_text(file.filename, content)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"파일 처리 중 오류가 발생했습니다: {str(e)}")
 
-    if not text:
-        raise HTTPException(status_code=400, detail="파일에서 텍스트를 추출할 수 없습니다.")
+        text = text.strip()
+
+        if not text:
+            raise HTTPException(status_code=400, detail="파일에서 텍스트를 추출할 수 없습니다.")
+
+        # 파일 캐시 저장
+        chunks = split_into_chunks(text)
+        await cache.set(
+            file_cache_key,
+            json.dumps({"text": text, "total_chunks": len(chunks), "total_characters": len(text)}),
+            CACHE_TTL_FILE
+        )
 
     # 첫 번째 청크만 분석
     chunks = split_into_chunks(text)
     first_chunk = chunks[0] if chunks else text
+
+    # 분석 캐시 확인
+    analyze_cache_key = CacheService.make_analyze_key(HAIKU_MODEL, first_chunk)
+    cached_analyze = await cache.get(analyze_cache_key)
+    if cached_analyze:
+        data = json.loads(cached_analyze)
+        return AnalyzeResponse(words=data["words"], scores=data["scores"], cached=True)
 
     try:
         words, scores = await extract_important_parts_single_chunk(first_chunk)
@@ -164,4 +241,7 @@ async def analyze_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"분석 중 오류가 발생했습니다: {str(e)}")
 
-    return AnalyzeResponse(words=words, scores=scores)
+    # 분석 캐시 저장
+    await cache.set(analyze_cache_key, json.dumps({"words": words, "scores": scores}), CACHE_TTL_ANALYZE)
+
+    return AnalyzeResponse(words=words, scores=scores, cached=False)
