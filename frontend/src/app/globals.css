@@ -246,6 +246,7 @@ body {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1.5rem;
+  flex-wrap: wrap;
 }
 
 .heatmap-indicator {
@@ -263,34 +264,38 @@ body {
   color: var(--text-secondary);
 }
 
-.heatmap-content {
-  font-family: var(--font-crimson-pro), Georgia, serif;
-  font-size: 1.25rem;
-  line-height: 2.25;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
+.heatmap-stats {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-left: auto;
+  margin-right: 8px;
 }
 
-/* ========== Heatmap Line Styles ========== */
-.heatmap-line {
-  display: block;
-  margin-bottom: 6px;
-  padding: 0 8px;
-  line-height: 2.2;
-  border-radius: 6px;
+.heatmap-loader {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.heatmap-content {
+  font-family: var(--font-crimson-pro), Georgia, serif;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
 }
 
 /* ========== Heatmap Word Styles ========== */
 .heatmap-word {
   display: inline;
   cursor: default;
-  transition: all 0.15s ease;
-  position: relative;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
-.heatmap-word:hover {
+.heatmap-word[title]:hover {
   filter: brightness(0.92);
 }
+
 
 /* 코드 인라인 */
 .md-code-inline {
@@ -298,11 +303,28 @@ body {
   font-size: 0.9em;
 }
 
-/* ========== Legend Sample ========== */
-.legend-sample {
-  padding: 4px 12px;
+/* ========== Legend ========== */
+.legend-gradient {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legend-gradient-bar {
+  width: 150px;
+  height: 16px;
   border-radius: 4px;
-  display: inline-block;
+  background: linear-gradient(90deg,
+    rgba(255, 213, 79, 0.3) 0%,
+    rgba(255, 213, 79, 0.8) 100%
+  );
+}
+
+.legend-gradient-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--muted);
 }
 
 /* ========== Legend ========== */
@@ -394,4 +416,78 @@ body {
 .md-newline {
   display: block;
   height: 0.75rem;
+}
+
+/* ========== Translation Tooltips ========== */
+.heatmap-word {
+  position: relative;
+  cursor: pointer;
+}
+
+.word-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a1a;
+  color: #ffffff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  animation: tooltipFadeIn 0.2s ease;
+  pointer-events: none;
+}
+
+.word-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1a1a1a;
+}
+
+.sentence-tooltip-fixed {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2d2d2d;
+  color: #ffffff;
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  max-width: 600px;
+  width: max-content;
+  white-space: normal;
+  line-height: 1.6;
+  z-index: 1000;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  animation: tooltipFadeIn 0.3s ease;
+  text-align: center;
+  pointer-events: none;
+}
+
+.sentence-tooltip-fixed.tooltip-top {
+  top: 80px;
+}
+
+.sentence-tooltip-fixed.tooltip-bottom {
+  bottom: 80px;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }

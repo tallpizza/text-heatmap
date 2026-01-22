@@ -1,10 +1,35 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { translateWord, translateSentence } from "@/lib/api";
 
 const WORDS_PER_PAGE = 2000;
+
+// rendering-hoist-jsx: 고정 스타일 객체를 컴포넌트 외부로 추출
+const SENTENCE_TOOLTIP_BASE_STYLE: React.CSSProperties = {
+  position: 'fixed',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  background: '#2d2d2d',
+  color: '#ffffff',
+  padding: '16px 24px',
+  borderRadius: '12px',
+  fontSize: '1rem',
+  maxWidth: '600px',
+  zIndex: 9999,
+  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+  whiteSpace: 'pre-wrap',
+  lineHeight: 1.6,
+};
+
+const DEFAULT_CONTENT_STYLE: React.CSSProperties = {
+  fontSize: "1.125rem",
+  lineHeight: 2,
+  textAlign: "justify",
+  maxWidth: "50rem",
+  margin: "0 auto",
+};
 
 interface HeatmapViewProps {
   words: string[];
@@ -207,30 +232,39 @@ export default function HeatmapView({
     setVisibleCount(WORDS_PER_PAGE);
   }, [words, scores]);
 
+  // rerender-memo: 단어 수 계산 메모이제이션
+  const wordCount = useMemo(
+    () => words.filter(w => w !== "\n").length,
+    [words]
+  );
+
+  // rerender-memo: visible words 메모이제이션
+  const visibleWords = useMemo(
+    () => words.slice(0, visibleCount),
+    [words, visibleCount]
+  );
+
   if (words.length === 0) {
     return null;
   }
 
-  const visibleWords = words.slice(0, visibleCount);
   const hasMoreWords = visibleCount < words.length;
   const showLoader = hasMoreWords || hasMore;
 
   // 클라이언트 마운트 후에만 설정 적용 (hydration 문제 방지)
-  const contentStyle: React.CSSProperties = mounted
-    ? {
-        fontSize: `${fontSize}rem`,
-        lineHeight: lineHeight,
-        textAlign: textAlign,
-        maxWidth: `${maxWidth}rem`,
-        margin: "0 auto",
-      }
-    : {
-        fontSize: "1.125rem",
-        lineHeight: 2,
-        textAlign: "justify",
-        maxWidth: "50rem",
-        margin: "0 auto",
-      };
+  // rerender-memo: 스타일 객체 메모이제이션
+  const contentStyle = useMemo<React.CSSProperties>(() =>
+    mounted
+      ? {
+          fontSize: `${fontSize}rem`,
+          lineHeight: lineHeight,
+          textAlign: textAlign,
+          maxWidth: `${maxWidth}rem`,
+          margin: "0 auto",
+        }
+      : DEFAULT_CONTENT_STYLE,
+    [mounted, fontSize, lineHeight, textAlign, maxWidth]
+  );
 
   const renderWord = (word: string, index: number) => {
     // 줄바꿈 처리
@@ -287,11 +321,12 @@ export default function HeatmapView({
         onMouseLeave={handleMouseLeave}
       >
         {needsSpace ? " " : ""}{word}
-        {showWordTooltip && (
+        {/* rendering-conditional-render: 삼항 연산자 사용 */}
+        {showWordTooltip ? (
           <span className="word-tooltip">
             {wordLoading ? "번역 중..." : wordTranslation}
           </span>
-        )}
+        ) : null}
       </span>
     );
   };
@@ -306,15 +341,17 @@ export default function HeatmapView({
           <div className="heatmap-indicator" />
           <h3 className="heatmap-title">분석 결과</h3>
           <span className="heatmap-stats">
-            {words.filter(w => w !== "\n").length.toLocaleString()}단어
-            {totalChunks > 1 && ` (청크 ${loadedChunkCount}/${totalChunks})`}
+            {wordCount.toLocaleString()}단어
+            {/* rendering-conditional-render */}
+            {totalChunks > 1 ? ` (청크 ${loadedChunkCount}/${totalChunks})` : null}
           </span>
         </div>
 
         <div className="heatmap-content" style={contentStyle}>
           {visibleWords.map((word, index) => renderWord(word, index))}
 
-          {showLoader && (
+          {/* rendering-conditional-render: 삼항 연산자 사용 */}
+          {showLoader ? (
             <div ref={loaderRef} className="heatmap-loader">
               {loadingMore ? (
                 <span>청크 {loadedChunkCount + 1}/{totalChunks} 분석 중...</span>
@@ -324,7 +361,7 @@ export default function HeatmapView({
                 <span>스크롤하여 다음 청크 로드</span>
               ) : null}
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="heatmap-legend">
@@ -342,29 +379,18 @@ export default function HeatmapView({
       </div>
 
       {/* 문장 번역 툴팁 (고정 위치) */}
-      {showSentenceTooltip && (
+      {/* rendering-conditional-render: 삼항 연산자 사용 */}
+      {showSentenceTooltip ? (
         <div
           style={{
-            position: 'fixed',
+            ...SENTENCE_TOOLTIP_BASE_STYLE,
             top: tooltipOnTop ? '100px' : 'auto',
             bottom: tooltipOnTop ? 'auto' : '100px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: '#2d2d2d',
-            color: '#ffffff',
-            padding: '16px 24px',
-            borderRadius: '12px',
-            fontSize: '1rem',
-            maxWidth: '600px',
-            zIndex: 9999,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-            whiteSpace: 'pre-wrap',
-            lineHeight: 1.6,
           }}
         >
           {sentenceLoading ? "문장 번역 중..." : sentenceTranslation || "번역 대기중..."}
         </div>
-      )}
+      ) : null}
     </>
   );
 }

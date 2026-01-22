@@ -8,7 +8,7 @@ interface FileUploadProps {
 }
 
 const ACCEPTED_TYPES = ".txt,.pdf,.docx";
-const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE_MB = 100;
 
 export default function FileUpload({
   onFileSelect,
