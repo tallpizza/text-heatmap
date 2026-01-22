@@ -90,7 +90,7 @@ export default function HeatmapView({
   totalChunks = 1,
   loadedChunkCount = 1,
 }: HeatmapViewProps) {
-  const { fontSize, lineHeight, textAlign, maxWidth } = useSettingsStore();
+  const { fontSize, lineHeight, textAlign, maxWidth, translationEnabled } = useSettingsStore();
   const [visibleCount, setVisibleCount] = useState(WORDS_PER_PAGE);
   const [mounted, setMounted] = useState(false);
   const loaderRef = useRef<HTMLDivElement>(null);
@@ -171,6 +171,9 @@ export default function HeatmapView({
     setParagraphLoading(false);
     setParagraphRange(null);
 
+    // 번역이 비활성화되어 있으면 번역 로직 건너뛰기
+    if (!translationEnabled) return;
+
     // 0.5초 후 단어 번역 시작
     hoverTimerRef.current = setTimeout(() => {
       setHoverPhase(1);
@@ -214,7 +217,7 @@ export default function HeatmapView({
           });
       }, 3000);
     }, 500);
-  }, [words, findSentenceBounds, findParagraphBounds]);
+  }, [words, findSentenceBounds, findParagraphBounds, translationEnabled]);
 
   const handleMouseLeave = useCallback(() => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
@@ -233,7 +236,7 @@ export default function HeatmapView({
 
   // 클릭 시 문단 번역 시작
   const handleClick = useCallback((index: number) => {
-    if (hoverPhase < 2 || !paragraphRange) return;
+    if (!translationEnabled || hoverPhase < 2 || !paragraphRange) return;
 
     setHoverPhase(3);
     setParagraphLoading(true);
@@ -252,7 +255,7 @@ export default function HeatmapView({
       .finally(() => {
         setParagraphLoading(false);
       });
-  }, [hoverPhase, paragraphRange, words]);
+  }, [translationEnabled, hoverPhase, paragraphRange, words]);
 
   useEffect(() => {
     setMounted(true);
