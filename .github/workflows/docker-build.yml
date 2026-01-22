@@ -13,6 +13,7 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - '.github/workflows/docker-build.yml'
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -31,12 +32,14 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
+              - '.github/workflows/docker-build.yml'
             frontend:
               - 'frontend/**'
+              - '.github/workflows/docker-build.yml'
 
   build-backend:
     needs: changes
-    if: ${{ needs.changes.outputs.backend == 'true' }}
+    if: ${{ needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -73,7 +76,7 @@ jobs:
 
   build-frontend:
     needs: changes
-    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    if: ${{ needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
